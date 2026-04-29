@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 주식투자 분석 Pro v2.0</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel CDN (JSX 변환용) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 폰트: Pretendard -->
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <style>
+        body { 
+            font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; 
+            transition: background-color 0.3s, color 0.3s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .tab-active { 
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%); 
+            color: white !important; 
+            border: none !important; 
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4); 
+        }
+        .dark { background-color: #0f172a; color: #f8fafc; }
+        .glass { backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.8); }
+        .dark .glass { background: rgba(15, 23, 42, 0.8); border-color: #1e293b; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+    </style>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 500: '#3b82f6', 600: '#2563eb' }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-950">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ==========================================
+        // 1. 데이터 정의 (초등학생 수준 용어 설명 반영)
+        // ==========================================
+        const KOREA_STOCKS = ['삼성전자', 'SK하이닉스', 'NAVER', '카카오', 'LG에너지솔루션', '현대차', '셀트리온', '삼성SDI', '기아', 'POSCO홀딩스'];
+        const US_STOCKS = ['Apple', 'Microsoft', 'NVIDIA', 'Tesla', 'Google', 'Amazon', 'Meta', 'Netflix', 'AMD', 'Intel'];
+        const ETF_LIST = [
+            { name: 'SPY', desc: 'S&P500 추종 (미국 대표)', country: '🇺🇸', region: '미국' },
+            { name: 'QQQ', desc: '나스닥100 (기술주 중심)', country: '🇺🇸', region: '미국' },
+            { name: 'VOO', desc: 'S&P500 (뱅가드, 저비용)', country: '🇺🇸', region: '미국' },
+            { name: 'VTI', desc: '미국 전체시장 3,500종목', country: '🇺🇸', region: '미국' },
+            { name: 'SCHD', desc: '배당성장 (10년 연속 배당)', country: '🇺🇸', region: '미국' },
+            { name: 'JEPI', desc: '월배당 커버드콜 (7-10%)', country: '🇺🇸', region: '미국' },
+            { name: 'VWO', desc: '신흥국 전체', country: '🇺🇸', region: '글로벌' },
+            { name: 'VEA', desc: '선진국 (미국 제외)', country: '🇺🇸', region: '글로벌' },
+            { name: 'KODEX 200', desc: 'KOSPI200 추종', country: '🇰🇷', region: '한국' },
+            { name: 'KODEX 코스닥150', desc: '코스닥 대표 150종목', country: '🇰🇷', region: '한국' },
+            { name: 'TIGER 미국S&P500', desc: 'S&P500 원화투자', country: '🇰🇷', region: '미국' },
+            { name: 'TIGER 미국나스닥100', desc: '나스닥100 원화투자', country: '🇰🇷', region: '미국' },
+            { name: 'TIGER 미국배당다우존스', desc: 'SCHD 한국판 월배당', country: '🇰🇷', region: '미국' },
+            { name: 'KODEX 미국배당프리미엄액티브', desc: 'JEPI 한국판 월배당', country: '🇰🇷', region: '미국' },
+            { name: 'ARIRANG 고배당주', desc: '국내 고배당 우량주', country: '🇰🇷', region: '한국' }
+        ];
+
+        const SECTORS = [
+            { id: 'ai', name: 'AI', full: 'AI 인공지능', keywords: 'AI, 머신러닝, LLM, GPU' },
+            { id: 'semiconductor', name: '반도체', full: '반도체', keywords: 'HBM, 메모리, 파운드리' },
+            { id: 'battery', name: '2차전지', full: '2차전지', keywords: '전기차 배터리, ESS' },
+            { id: 'bio', name: '바이오', full: '바이오/제약', keywords: '신약, CDMO, 임상' },
+            { id: 'platform', name: 'IT플랫폼', full: 'IT 플랫폼', keywords: '포털, 커머스, 핀테크' },
+            { id: 'defense', name: '방산', full: '방산', keywords: 'K-방산, 수출' },
+            { id: 'energy', name: '에너지', full: '에너지', keywords: '수소, 원자력, 신재생' },
+            { id: 'finance', name: '금융', full: '금융', keywords: '은행, 증권, 보험' },
+            { id: 'consumer', name: '소비재', full: '소비재', keywords: '화장품, 식품, 유통' },
+            { id: 'auto', name: '자동차', full: '자동차', keywords: '전기차, 자율주행' },
+            { id: 'shipbuilding', name: '조선/해운', full: '조선/해운', keywords: 'LNG선, 컨테이너선, 해운' },
+            { id: 'entertainment', name: '엔터/게임', full: '엔터테인먼트/게임', keywords: 'K-POP, 드라마, 게임' },
+            { id: 'robot', name: '로봇', full: '로봇/자동화', keywords: '산업용로봇, 휴머노이드' },
+            { id: 'travel', name: '항공/여행', full: '항공/여행', keywords: '항공사, 여행사, 면세점' },
+            { id: 'construction', name: '건설', full: '건설/인프라', keywords: '아파트, SOC, 플랜트' },
+            { id: 'telecom', name: '통신', full: '통신', keywords: '5G, 인터넷, 배당' }
+        ];
+
+        const TERMS = {
+            basic: [
+                { 
+                    term: 'PER', 
+                    full: '주가수익비율 (Price Earning Ratio)', 
+                    desc: '장사해서 본전 뽑는 데 얼마나 걸릴까?', 
+                    detail: '어떤 빵집이 1년에 100원을 벌어요. 그런데 이 빵집을 사려면 1,000원이 필요하대요.\n\n• 1,000원 ÷ 100원 = 10\n• 즉, 10년 동안 장사해야 본전을 찾는다는 뜻이에요.\n• 숫자가 작을수록 "본전을 빨리 찾네? 싸다!"라고 생각해요.\n• 보통 10보다 작으면 싸다고 하지만, 인기 많은 IT 회사는 30이 넘기도 해요.', 
+                    example: '삼성전자가 PER 10배라면, 10년치 이익을 미리 주고 산다는 뜻!' 
+                },
+                { 
+                    term: 'PBR', 
+                    full: '주가순자산비율 (Price Book Ratio)', 
+                    desc: '회사가 가진 재산보다 주식이 더 쌀까?', 
+                    detail: '빵집 건물이랑 오븐을 다 팔면 1,000원이 나와요. 그런데 빵집 주식 가격은 500원뿐이에요.\n\n• 빵집을 통째로 사서 바로 부순 다음 건물만 팔아도 500원이 남죠?\n• 이 숫자가 1보다 작으면 "회사 재산보다 주식이 더 싸네!"라고 해요.\n• 숫자가 1보다 크면 재산보다 비싸지만 장사가 아주 잘 된다는 뜻일 수 있어요.', 
+                    example: '현대차 PBR 0.5배: 자동차 공장 땅값이 주식 가격보다 훨씬 비싸다는 뜻!' 
+                },
+                { 
+                    term: 'ROE', 
+                    full: '자기자본이익률 (Return On Equity)', 
+                    desc: '내 돈으로 얼마나 장사를 잘했나?', 
+                    detail: '내가 용돈 1,000원을 들여서 떡볶이 장사를 시작했어요.\n\n• 1년 동안 150원을 벌었다면 ROE는 15%예요.\n• 워런 버핏 할아버지는 이 숫자가 15%가 넘는 "장사 천재" 회사들을 좋아해요.\n• 숫자가 높을수록 내 돈을 불리는 실력이 좋은 회사예요.', 
+                    example: '애플 ROE 150%: 내 돈 1,000원으로 1,500원을 버는 엄청난 장사꾼!' 
+                }
+            ],
+            financial: [
+                { 
+                    term: '부채비율', 
+                    full: 'Debt to Equity Ratio', 
+                    desc: '내 돈에 비해 빚이 얼마나 많을까?', 
+                    detail: '내 돈 100원인데 빚이 200원이면 부채비율은 200%예요.\n\n• 보통 100%보다 작으면 "빚이 적고 건강하네"라고 해요.\n• 빚이 너무 많으면 나중에 이자 갚느라 장사가 힘들어질 수 있어요.', 
+                    example: '부채비율 50%: 빚이 내 돈의 절반밖에 안 되는 튼튼한 회사!' 
+                },
+                { 
+                    term: '영업이익률', 
+                    full: 'Operating Profit Margin', 
+                    desc: '물건 팔아서 진짜 남는 돈은 얼마?', 
+                    detail: '1,000원짜리 빵을 팔았는데 재료값 빼고 순수하게 200원이 남았다면?\n\n• 영업이익률은 20%예요.\n• 명품이나 약을 만드는 회사는 이 숫자가 높고, 마트는 이 숫자가 낮아요.\n• 이 숫자가 높을수록 "기술력이 좋거나 인기가 많아서 비싸게 팔 수 있다"는 뜻이에요.', 
+                    example: '네이버 영업이익률 15%: 1,000원 서비스 팔면 150원이 이익!' 
+                }
+            ],
+            valuation: [
+                { 
+                    term: '적정주가', 
+                    full: 'Fair Value', 
+                    desc: '이 주식의 진짜 올바른 가격은 얼마일까?', 
+                    detail: '시장에서 어떤 카드가 10,000원에 팔리는데, 사실 그 카드의 희귀도를 따져보니 7,000원이 적당하다면?\n\n• 7,000원이 바로 적정주가예요.\n• AI는 회사의 이익과 재산을 계산해서 "이 정도 가격이 딱 좋아요"라고 알려줘요.', 
+                    example: '삼성전자 현재가 7만원, 적정주가 8만원: "아직 만원 더 오를 수 있겠네!"' 
+                },
+                { 
+                    term: '안전마진', 
+                    full: 'Margin of Safety', 
+                    desc: '실수할 수도 있으니 좀 더 싸게 사자!', 
+                    detail: '8,000원짜리 장난감을 6,000원에 사고 싶어하는 마음이에요.\n\n• 내가 계산한 적정가보다 더 싸게 사야, 나중에 내 계산이 틀려도 손해를 덜 봐요.\n• "할인할 때까지 기다렸다가 사자"는 것과 비슷해요.', 
+                    example: '안전마진 20%: 10만원짜리 주식을 8만원에 사려고 기다리는 지혜!' 
+                }
+            ],
+            etf: [
+                { 
+                    term: 'ETF', 
+                    full: '상장지수펀드', 
+                    desc: '맛있는 과자만 모아둔 "모듬 과자 세트"', 
+                    detail: '초콜릿, 사탕, 젤리를 하나씩 사려면 비싸죠?\n\n• ETF는 인기 있는 주식들을 골고루 조금씩 담아둔 바구니예요.\n• 바구니 1개만 사도 수많은 회사에 동시에 투자하는 효과가 있어요.', 
+                    example: 'SPY ETF: 미국에서 제일 잘나가는 회사 500개를 모아둔 세트!' 
+                },
+                { 
+                    term: '운용보수', 
+                    full: 'Expense Ratio', 
+                    desc: '과자 세트를 관리해주는 분께 드리는 수수료', 
+                    detail: 'ETF를 대신 관리해주고 좋은 주식으로 바꿔주는 전문가들에게 주는 돈이에요.\n\n• 수익에서 아주 조금씩(연 0.03% 등) 자동으로 빠져나가요.\n• 장기 투자할 때는 보수가 싼 것을 고르는 게 유리해요.', 
+                    example: '100만원 투자 시 보수 0.03%: 1년에 고작 300원! 엄청 싸죠?' 
+                }
+            ],
+            trading: [
+                { 
+                    term: '분할매수', 
+                    full: 'DCA (Dollar Cost Averaging)', 
+                    desc: '언제가 싼지 모르니까 나눠서 사자!', 
+                    detail: '오늘 빵값이 싼지 내일 싼지 모르겠다면?\n\n• 오늘 1개, 내일 1개, 모레 1개씩 꾸준히 사는 거예요.\n• 비쌀 땐 적게 사고, 쌀 땐 많이 사게 되어 결국 "평균적인 싼 가격"에 사게 돼요.', 
+                    example: '매달 용돈 1만원씩 애플 주식 사기: 시간이 지날수록 부자가 되는 비결!' 
+                }
+            ],
+            technical: [
+                { 
+                    term: '골든크로스', 
+                    full: 'Golden Cross', 
+                    desc: '힘차게 뛰어오를 준비 완료!', 
+                    detail: '최근 5일 동안의 주가 평균이 최근 20일 동안의 평균을 뚫고 위로 올라가는 거예요.\n\n• "오! 이제부터 상승세가 시작되나 본데?"라고 믿는 신호예요.\n• 황금빛(골든) 기회가 왔다는 뜻으로 해석해요.', 
+                    example: '삼성전자 차트에 골든크로스 발생: "이제 곧 비싸질 수도 있겠어!"' 
+                }
+            ]
+        };
+
+        // ==========================================
+        // 2. 메인 앱 컴포넌트
+        // ==========================================
+        const App = () => {
+            const [currentMenu, setCurrentMenu] = useState('morning');
+            const [selectedStocks, setSelectedStocks] = useState([]);
+            const [generatedPrompt, setGeneratedPrompt] = useState('');
+            const [promptHistory, setPromptHistory] = useState([]);
+            const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
+            const [expandedTerm, setExpandedTerm] = useState(null);
+            const [termCategory, setTermCategory] = useState('basic');
+
+            // 옵션 상태
+            const [morningOpt, setMorningOpt] = useState({ newsType: '정치테마', market: '한국' });
+            const [recommendOpt, setRecommendOpt] = useState({ sector: 'ai', type: '성장주', period: '6개월', growthRate: '30%', count: '5개' });
+            const [fundamentalOpt, setFundamentalOpt] = useState({ analysisType: '종합분석', focusArea: 'ROE' });
+            const [valuationOpt, setValuationOpt] = useState({ method: '상대가치', safetyMargin: '20%' });
+            const [technicalOpt, setTechnicalOpt] = useState({ timeframe: '일봉', indicator: '이동평균', pattern: '추세' });
+            const [qualitativeOpt, setQualitativeOpt] = useState({ focus: '경쟁우위' });
+            const [riskOpt, setRiskOpt] = useState({ scenario: '3가지', stopLoss: '15%' });
+            const [portfolioOpt, setPortfolioOpt] = useState({ totalAmount: '1000만원', strategy: '균등분산' });
+            const [etfOpt, setEtfOpt] = useState({ goal: '장기투자', style: '패시브', region: '글로벌' });
+
+            const inputRef = useRef(null);
+
+            // --- 테마 및 로컬스토리지 동기화 ---
+            useEffect(() => {
+                const root = window.document.documentElement;
+                if (isDarkMode) root.classList.add('dark');
+                else root.classList.remove('dark');
+                localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+            }, [isDarkMode]);
+
+            useEffect(() => {
+                const stocks = localStorage.getItem('selected_stocks');
+                const history = localStorage.getItem('prompt_history');
+                if (stocks) setSelectedStocks(JSON.parse(stocks));
+                if (history) setPromptHistory(JSON.parse(history));
+            }, []);
+
+            useEffect(() => {
+                localStorage.setItem('selected_stocks', JSON.stringify(selectedStocks));
+                localStorage.setItem('prompt_history', JSON.stringify(promptHistory));
+            }, [selectedStocks, promptHistory]);
+
+            // --- 핸들러 ---
+            const toggleStock = (s) => setSelectedStocks(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
+            const addCustomStock = () => {
+                const val = inputRef.current?.value.trim();
+                if (val && !selectedStocks.includes(val)) {
+                    setSelectedStocks([...selectedStocks, val]);
+                    inputRef.current.value = '';
+                }
+            };
+            const clearStocks = () => setSelectedStocks([]);
+
+            const menus = [
+                { id: 'morning', name: '모닝브리핑', icon: '🌅' },
+                { id: 'recommend', name: '종목발굴', icon: '💡' },
+                { id: 'discovery', name: '내종목', icon: '🔍' },
+                { id: 'fundamental', name: '재무', icon: '📊' },
+                { id: 'valuation', name: '밸류', icon: '💰' },
+                { id: 'technical', name: '기술적', icon: '📈' },
+                { id: 'qualitative', name: '질적', icon: '🧠' },
+                { id: 'risk', name: '리스크', icon: '⚠️' },
+                { id: 'portfolio', name: '포트폴리오', icon: '💼' },
+                { id: 'etf', name: 'ETF', icon: '🏦' },
+                { id: 'terms', name: '사전', icon: '📖' }
+            ];
+
+            // --- 프롬프트 생성 엔진 ---
+            const generatePrompt = () => {
+                const timestamp = new Date().toLocaleString();
+                let body = "";
+                const stockListStr = selectedStocks.join(', ');
+                const header = `📅 분석 요청 시점: ${timestamp}\n⚠️ 중요: 반드시 2026년 기준 최신 데이터를 실시간 Web Search로 조회하세요.\n\n`;
+
+                switch(currentMenu) {
+                    case 'morning':
+                        body = `[Role] 당신은 10년 경력의 단타 전문가입니다.\n[Instruction] 오늘 ${morningOpt.market} 시장의 ${morningOpt.newsType} 최신 뉴스를 검색하고, 주가에 영향 줄 핵심 종목 3개를 발굴해 매매 시나리오를 작성하세요.`;
+                        break;
+                    case 'recommend':
+                        const sec = SECTORS.find(s=>s.id===recommendOpt.sector);
+                        body = `[Role] ${sec.full} 전문 애널리스트\n[Instruction] ${recommendOpt.type} 스타일로 ${recommendOpt.count}개 종목을 추천하세요. 목표수익률 ${recommendOpt.growthRate}, 기간 ${recommendOpt.period} 기준입니다.`;
+                        break;
+                    case 'discovery':
+                        body = `[Instruction] ${stockListStr} 종목에 대해 현재 주가, 밸류에이션, SWOT 분석 및 매수/매도 타이밍을 실시간 데이터를 바탕으로 심층 분석하세요.`;
+                        break;
+                    case 'fundamental':
+                        body = `[Instruction] ${stockListStr}의 재무 건전성을 ${fundamentalOpt.analysisType}로 진단하세요. 특히 ${fundamentalOpt.focusArea} 지표의 5개년 트렌드와 수익성을 중점적으로 봅니다.`;
+                        break;
+                    case 'valuation':
+                        body = `[Instruction] ${stockListStr}의 적정 주가를 ${valuationOpt.method}로 산출하세요. 안전마진 ${valuationOpt.safetyMargin}를 적용한 최종 목표 매수가를 제시하세요.`;
+                        break;
+                    case 'technical':
+                        body = `[Instruction] ${stockListStr}의 ${technicalOpt.timeframe} 차트를 ${technicalOpt.indicator} 기반으로 분석하세요. 지지/저항 가격을 명확히 제시하고 ${technicalOpt.pattern} 패턴을 확인하세요.`;
+                        break;
+                    case 'qualitative':
+                        body = `[Instruction] ${stockListStr}의 비재무적 요소인 ${qualitativeOpt.focus}을 심층 평가하세요. 장기적인 해자(Moat) 유무를 분석합니다.`;
+                        break;
+                    case 'risk':
+                        body = `[Instruction] ${stockListStr}에 대해 ${riskOpt.scenario} 시나리오(Bull/Base/Bear) 분석을 수행하세요. 손절 기준 ${riskOpt.stopLoss}를 적용한 리스크 관리 계획을 세우세요.`;
+                        break;
+                    case 'portfolio':
+                        body = `[Instruction] 자산 ${portfolioOpt.totalAmount}을 ${stockListStr}에 ${portfolioOpt.strategy}로 배분하는 포트폴리오 최적화 안을 제시하세요.`;
+                        break;
+                    case 'etf':
+                        body = `[Instruction] ${stockListStr} ETF들을 ${etfOpt.goal} 관점에서 비교 분석하세요. 보수, 괴리율, 분배금 실시간 정보를 포함합니다.`;
+                        break;
+                    default: body = `${stockListStr} 종합 분석`;
+                }
+
+                const final = `${header}${body}\n\n[Output Format]\n1. 핵심 요약 테이블\n2. 상세 분석 내용\n3. 대응 가격(손절/익절) 수치 제시\n4. 미래 전망 ASCII 그래프 시각화`.trim();
+                
+                setGeneratedPrompt(final);
+                setPromptHistory(prev => [{ id: Date.now(), menu: menus.find(m=>m.id===currentMenu).name, content: final, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 10));
+                setTimeout(() => document.getElementById('result-view')?.scrollIntoView({ behavior: 'smooth' }), 100);
+            };
+
+            // --- UI 컴포넌트 ---
+            const OptionSelector = ({ label, options, value, onChange, cols = 2 }) => (
+                <div className="mb-5">
+                    <p className="text-[11px] font-black text-gray-400 dark:text-gray-500 mb-3 uppercase tracking-wider">{label}</p>
+                    <div className={`grid gap-2 grid-cols-${cols}`}>
+                        {options.map(opt => (
+                            <button key={opt} onClick={() => onChange(opt)} className={`py-3 px-2 rounded-2xl text-xs font-bold border-2 transition-all ${value === opt ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-white dark:bg-gray-800 text-gray-500 border-gray-100 dark:border-gray-700 hover:border-gray-200'}`}>
+                                {opt}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const CopyButton = ({ text }) => {
+                const [copied, setCopied] = useState(false);
+                const handleCopy = () => {
+                    const el = document.createElement('textarea');
+                    el.value = text;
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                };
+                return (
+                    <button onClick={handleCopy} className={`w-full py-4 rounded-2xl font-black transition-all shadow-xl active:scale-[0.98] ${copied ? 'bg-green-500 text-white' : 'bg-blue-600 text-white'}`}>
+                        {copied ? '✅ 복사되었습니다!' : '📋 AI 프롬프트 복사'}
+                    </button>
+                );
+            };
+
+            return (
+                <div className="min-h-screen">
+                    {/* Header */}
+                    <header className="sticky top-0 z-50 glass border-b dark:border-gray-800 px-4 py-4 flex justify-between items-center">
+                        <h1 className="text-xl font-black bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent italic">STOCK AI PRO</h1>
+                        <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-3 rounded-2xl bg-gray-100 dark:bg-gray-800 transition-transform active:scale-90">
+                            {isDarkMode ? '☀️' : '🌙'}
+                        </button>
+                    </header>
+
+                    {/* Navbar */}
+                    <nav className="sticky top-[69px] z-40 overflow-x-auto scrollbar-hide px-4 py-3 glass border-b dark:border-gray-800 flex space-x-2">
+                        {menus.map(m => (
+                            <button key={m.id} onClick={() => {setCurrentMenu(m.id); setGeneratedPrompt('');}} className={`flex items-center space-x-1 px-5 py-2.5 rounded-2xl text-sm font-bold whitespace-nowrap transition-all border ${currentMenu === m.id ? 'tab-active' : 'bg-white dark:bg-gray-900 text-gray-400 border-gray-100 dark:border-gray-700'}`}>
+                                <span>{m.icon}</span> <span>{m.name}</span>
+                            </button>
+                        ))}
+                    </nav>
+
+                    <main className="max-w-xl mx-auto p-4 space-y-6 pb-40">
+                        
+                        {/* 종목 선택 영역 */}
+                        {['discovery', 'fundamental', 'valuation', 'technical', 'qualitative', 'risk', 'portfolio', 'etf'].includes(currentMenu) && (
+                            <section className="bg-white dark:bg-gray-900 rounded-[2rem] p-6 shadow-sm border dark:border-gray-800 animate-fade-in">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-sm font-black text-blue-500">📌 대상 선택</h3>
+                                    {selectedStocks.length > 0 && <button onClick={clearStocks} className="text-xs text-red-500 font-bold">초기화</button>}
+                                </div>
+                                <div className="flex gap-2 mb-4">
+                                    <input ref={inputRef} placeholder="종목/티커 직접 입력" className="flex-1 bg-gray-50 dark:bg-gray-800 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-none dark:text-white" onKeyPress={e=>e.key==='Enter'&&addCustomStock()} />
+                                    <button onClick={addCustomStock} className="bg-gray-900 dark:bg-blue-600 text-white px-6 rounded-2xl text-sm font-bold active:scale-95 transition">추가</button>
+                                </div>
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    {(currentMenu === 'etf' ? ETF_LIST.map(e=>e.name) : [...KOREA_STOCKS, ...US_STOCKS]).map(s => (
+                                        <button key={s} onClick={() => toggleStock(s)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${selectedStocks.includes(s) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-transparent hover:bg-gray-200'}`}>{s}</button>
+                                    ))}
+                                </div>
+                                {selectedStocks.length > 0 && (
+                                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex flex-wrap gap-2">
+                                        {selectedStocks.map(s => (
+                                            <span key={s} className="bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg text-xs font-black text-blue-600 dark:text-blue-400 shadow-sm flex items-center">
+                                                {s} <button onClick={()=>toggleStock(s)} className="ml-2 text-gray-300">×</button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </section>
+                        )}
+
+                        {/* 메뉴별 상세 설정 영역 */}
+                        <section className="bg-white dark:bg-gray-900 rounded-[2rem] p-6 shadow-sm border dark:border-gray-800 animate-fade-in">
+                            {currentMenu === 'morning' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="🗞️ 뉴스 테마" options={['정치테마','기업공시','글로벌이슈','테마급등']} value={morningOpt.newsType} onChange={v=>setMorningOpt({...morningOpt, newsType:v})} />
+                                    <OptionSelector label="🌍 시장 범위" options={['한국','미국','전체']} value={morningOpt.market} onChange={v=>setMorningOpt({...morningOpt, market:v})} cols={3} />
+                                </div>
+                            )}
+                            {currentMenu === 'recommend' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="🎯 섹터" options={SECTORS.map(s=>s.name)} value={SECTORS.find(s=>s.id===recommendOpt.sector).name} onChange={v=>setRecommendOpt({...recommendOpt, sector: SECTORS.find(s=>s.name===v).id})} cols={4} />
+                                    <OptionSelector label="💎 스타일" options={['성장주','가치주','배당주']} value={recommendOpt.type} onChange={v=>setRecommendOpt({...recommendOpt, type:v})} cols={3} />
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <OptionSelector label="📅 기간" options={['3개월','6개월','1년']} value={recommendOpt.period} onChange={v=>setRecommendOpt({...recommendOpt, period:v})} cols={1} />
+                                        <OptionSelector label="🔢 개수" options={['3개','5개','10개']} value={recommendOpt.count} onChange={v=>setRecommendOpt({...recommendOpt, count:v})} cols={1} />
+                                    </div>
+                                </div>
+                            )}
+                            {currentMenu === 'fundamental' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="📊 분석 유형" options={['종합분석','비교분석','심층분석']} value={fundamentalOpt.analysisType} onChange={v=>setFundamentalOpt({...fundamentalOpt, analysisType:v})} cols={3} />
+                                    <OptionSelector label="🔍 집중 지표" options={['ROE','안정성','성장성']} value={fundamentalOpt.focusArea} onChange={v=>setFundamentalOpt({...fundamentalOpt, focusArea:v})} cols={3} />
+                                </div>
+                            )}
+                            {currentMenu === 'valuation' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="⚖️ 평가 방법" options={['상대가치','절대가치','종합']} value={valuationOpt.method} onChange={v=>setValuationOpt({...valuationOpt, method:v})} cols={3} />
+                                    <OptionSelector label="🛡️ 안전 마진" options={['10%','20%','30%','40%']} value={valuationOpt.safetyMargin} onChange={v=>setValuationOpt({...valuationOpt, safetyMargin:v})} cols={4} />
+                                </div>
+                            )}
+                            {currentMenu === 'technical' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="📈 보조 지표" options={['이동평균','모멘텀','거래량']} value={technicalOpt.indicator} onChange={v=>setTechnicalOpt({...technicalOpt, indicator:v})} cols={3} />
+                                    <OptionSelector label="⏱️ 차트 주기" options={['일봉','주봉','월봉']} value={technicalOpt.timeframe} onChange={v=>setTechnicalOpt({...technicalOpt, timeframe:v})} cols={3} />
+                                </div>
+                            )}
+                            {currentMenu === 'qualitative' && (
+                                <OptionSelector label="🧠 질적 요소" options={['경쟁우위','경영진','ESG']} value={qualitativeOpt.focus} onChange={v=>setQualitativeOpt({...qualitativeOpt, focus:v})} cols={3} />
+                            )}
+                            {currentMenu === 'risk' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="🌪️ 시나리오" options={['3가지','5가지','7가지']} value={riskOpt.scenario} onChange={v=>setRiskOpt({...riskOpt, scenario:v})} cols={3} />
+                                    <OptionSelector label="🛑 손절 기준" options={['10%','15%','20%','25%']} value={riskOpt.stopLoss} onChange={v=>setRiskOpt({...riskOpt, stopLoss:v})} cols={4} />
+                                </div>
+                            )}
+                            {currentMenu === 'portfolio' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="💵 가용 자산" options={['1000만원','5000만원','1억원']} value={portfolioOpt.totalAmount} onChange={v=>setPortfolioOpt({...portfolioOpt, totalAmount:v})} cols={3} />
+                                    <OptionSelector label="🧬 배분 전략" options={['균등분산','차등배분','집중투자']} value={portfolioOpt.strategy} onChange={v=>setPortfolioOpt({...portfolioOpt, strategy:v})} cols={3} />
+                                </div>
+                            )}
+                            {currentMenu === 'etf' && (
+                                <div className="space-y-2">
+                                    <OptionSelector label="🏦 투자 목표" options={['장기투자','배당수익','단기트레이딩']} value={etfOpt.goal} onChange={v=>setEtfOpt({...etfOpt, goal:v})} cols={3} />
+                                    <OptionSelector label="📊 운용 스타일" options={['패시브','액티브','테마']} value={etfOpt.style} onChange={v=>setEtfOpt({...etfOpt, style:v})} cols={3} />
+                                </div>
+                            )}
+
+                            {/* 용어 사전 UI (원본 데이터 유지) */}
+                            {currentMenu === 'terms' && (
+                                <div className="space-y-4">
+                                    <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2">
+                                        {Object.keys(TERMS).map(cat => (
+                                            <button key={cat} onClick={() => {setTermCategory(cat); setExpandedTerm(null);}} className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition ${termCategory === cat ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>
+                                                {cat.toUpperCase()}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="divide-y dark:divide-gray-800">
+                                        {TERMS[termCategory].map((t, i) => (
+                                            <div key={i} className="py-4">
+                                                <div onClick={() => setExpandedTerm(expandedTerm === i ? null : i)} className="flex justify-between items-center cursor-pointer group">
+                                                    <span className="font-bold text-blue-600 dark:text-blue-400 group-hover:underline">{t.term} <small className="text-gray-400 font-normal">({t.full})</small></span>
+                                                    <span className="text-gray-300">{expandedTerm === i ? '▲' : '▼'}</span>
+                                                </div>
+                                                {expandedTerm === i && (
+                                                    <div className="mt-3 p-4 bg-gray-50 dark:bg-gray-950 rounded-2xl text-[11px] leading-relaxed text-gray-500 animate-fade-in">
+                                                        <p className="mb-2 font-bold text-gray-800 dark:text-gray-200 text-sm">💡 {t.desc}</p>
+                                                        <p className="whitespace-pre-line text-gray-600 dark:text-gray-400">{t.detail}</p>
+                                                        {t.example && (
+                                                            <div className="mt-3 p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-100 dark:border-indigo-800">
+                                                                <p className="text-indigo-600 dark:text-indigo-300 font-black italic">🌟 초간단 예시:</p>
+                                                                <p className="text-indigo-500 dark:text-indigo-200">{t.example}</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {currentMenu !== 'terms' && (
+                                <button onClick={generatePrompt} className="w-full mt-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-5 rounded-2xl font-black shadow-xl transform active:scale-[0.98] transition-all">
+                                    ✨ RICE 프롬프트 생성하기
+                                </button>
+                            )}
+                        </section>
+
+                        {/* 결과 및 히스토리 영역 */}
+                        {generatedPrompt && (
+                            <div id="result-view" className="animate-fade-in">
+                                <div className={`p-6 rounded-[2.5rem] border-4 border-blue-500 shadow-2xl ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`}>
+                                    <h3 className="font-black text-xl italic mb-5 flex items-center">
+                                        <span className="flex h-3 w-3 rounded-full bg-blue-500 mr-3 animate-ping"></span>
+                                        PROMPT READY
+                                    </h3>
+                                    <textarea readOnly value={generatedPrompt} className={`w-full h-72 p-6 rounded-3xl text-[11px] font-mono leading-relaxed mb-6 border-none outline-none resize-none shadow-inner ${isDarkMode ? 'bg-gray-950 text-gray-400' : 'bg-gray-50 text-gray-600'}`} />
+                                    <CopyButton text={generatedPrompt} />
+                                </div>
+                            </div>
+                        )}
+
+                        {promptHistory.length > 0 && (
+                            <section className="mt-10 opacity-60 hover:opacity-100 transition-opacity">
+                                <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4 px-2">Recent History</h3>
+                                <div className="space-y-3">
+                                    {promptHistory.map(h => (
+                                        <div key={h.id} onClick={() => {setGeneratedPrompt(h.content); window.scrollTo({top: 0, behavior: 'smooth'});}} className="p-5 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-700 text-xs cursor-pointer hover:border-blue-400 transition-all flex justify-between items-center group">
+                                            <div className="flex flex-col">
+                                                <span className="font-bold text-gray-700 dark:text-gray-300">{h.menu}</span>
+                                                <span className="text-[10px] text-gray-400 mt-1">{h.time}</span>
+                                            </div>
+                                            <span className="text-blue-500 font-bold opacity-0 group-hover:opacity-100 italic transition-opacity">LOAD →</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        )}
+                    </main>
+
+                    <footer className="text-center py-20 opacity-20 text-[10px] font-black uppercase tracking-[0.4em] dark:text-white">
+                        © REAL LEADERSHIP | Shin Juil<br/>
+                        AI-DRIVEN STOCK ANALYSIS PRO v2.0
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
